@@ -34,6 +34,8 @@ class rx_path(gr.hier_block2):
         self._queue = queue
         self._spc = int(rate/2e6)
 
+        self.outfile = blocks.file_sink(gr.sizeof_float*1, "/tmp/outfile.dat", False)
+
         # Convert incoming I/Q baseband to amplitude
         self._demod = blocks.complex_to_mag_squared()
         if use_dcblock:
@@ -51,7 +53,8 @@ class rx_path(gr.hier_block2):
             self._bb = self._pmf
 
         # Establish baseline amplitude (noise, interference)
-        self._avg = blocks.moving_average_ff(48*self._spc, 1.0/(48*self._spc))#, self._rate) # 3 preambles
+        #self._avg = blocks.moving_average_ff(48*self._spc, 1.0/(48*self._spc))#, self._rate) # 3 preambles
+        self._avg = blocks.moving_average_ff(480*self._spc, 1.0/(480*self._spc))#, self._rate) # 3 preambles
 
         # Synchronize to Mode-S preamble
         self._sync = air_modes_swig.preamble(self._rate, self._threshold)
@@ -63,6 +66,8 @@ class rx_path(gr.hier_block2):
         self.connect(self._bb, (self._sync, 0))
         self.connect(self._bb, self._avg, (self._sync, 1))
         self.connect(self._sync, self._slicer)
+
+        self.connect(self._sync, self.outfile)    
 
     def set_rate(self, rate):
         self._sync.set_rate(int(rate))

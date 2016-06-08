@@ -220,6 +220,23 @@ int air_modes::preamble_impl::general_work(int noutput_items,
                 out[j] = in[i+int(j*d_samples_per_chip)] - inavg[i];
             }
 
+            //for(int j=0; j<240; j++) {
+            //    out[j] = 0;
+            //    for (int k=-1; k<2; k++) {
+            //      double fct = 0.5;
+            //      if (k==0) {
+            //         fct = 1;
+            //      }
+            //      out[j] += (in[i+int(j*d_samples_per_chip+k)] - inavg[i]) * fct;
+            //    }
+            //    out[j] = out[j] / 2.0;
+            //}
+            //for(int j=0; j<2400; j++) {
+            //    out[j] = in[i+int(j*d_samples_per_chip/10)] - inavg[i];
+            //}
+
+            printf("Preamble...\n");
+
             //get the timestamp of the preamble
             pmt::pmt_t tstamp = tag_to_timestamp(d_timestamp, abs_sample_cnt + i, d_sample_rate);
 
@@ -234,7 +251,8 @@ int air_modes::preamble_impl::general_work(int noutput_items,
             //produce only one output per work call -- TODO this should probably change
             if(0) std::cout << "Preamble consumed " << i+240*d_samples_per_chip << "with i=" << i << ", returned 240" << std::endl;
 
-            consume_each(i+240*d_samples_per_chip);
+            //consume_each(i+240*d_samples_per_chip);
+            consume_each(i+5);
             return 240;
         }
     }
