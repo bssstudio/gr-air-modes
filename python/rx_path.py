@@ -51,7 +51,8 @@ class rx_path(gr.hier_block2):
             self._bb = self._pmf
 
         # Establish baseline amplitude (noise, interference)
-        self._avg = blocks.moving_average_ff(48*self._spc, 1.0/(48*self._spc))#, self._rate) # 3 preambles
+        self._avg = blocks.moving_average_ff(480*self._spc, 1.0/(480*self._spc))#, self._rate) 
+ 
 
         # Synchronize to Mode-S preamble
         self._sync = air_modes_swig.preamble(self._rate, self._threshold)

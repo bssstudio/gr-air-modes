@@ -234,7 +234,7 @@ int air_modes::preamble_impl::general_work(int noutput_items,
             //produce only one output per work call -- TODO this should probably change
             if(0) std::cout << "Preamble consumed " << i+240*d_samples_per_chip << "with i=" << i << ", returned 240" << std::endl;
 
-            consume_each(i+240*d_samples_per_chip);
+            consume_each(i+5);
             return 240;
         }
     }
