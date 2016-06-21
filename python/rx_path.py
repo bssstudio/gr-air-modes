@@ -35,6 +35,8 @@ class rx_path(gr.hier_block2):
         self._spc = int(rate/2e6)
 
         self.outfile = blocks.file_sink(gr.sizeof_float*1, "/tmp/outfile.dat", False)
+        self.outfile_iq = blocks.file_sink(gr.sizeof_float*2, "/tmp/outfile_iq.dat", False) #complex
+        self.outfile_iq_dm = blocks.file_sink(gr.sizeof_float*1, "/tmp/outfile_dm.dat", False) 
 
         # Convert incoming I/Q baseband to amplitude
         self._demod = blocks.complex_to_mag_squared()
@@ -65,9 +67,18 @@ class rx_path(gr.hier_block2):
         # Wire up the flowgraph
         self.connect(self._bb, (self._sync, 0))
         self.connect(self._bb, self._avg, (self._sync, 1))
-        self.connect(self._sync, self._slicer)
+        self.connect(self, (self._sync, 2))
+        self.connect((self._sync,0), self._slicer)
 
-        self.connect(self._sync, self.outfile)    
+        self.connect((self._sync,0), self.outfile)    
+
+        self._demod2 = blocks.complex_to_mag_squared()
+        #self._pmf2 = blocks.moving_average_ff(self._spc, 1.0/self._spc)#, self._rate)
+        self.connect((self._sync,1), self.outfile_iq)    
+        self.connect((self._sync,1), self._demod2)    
+        self.connect(self._demod2, self.outfile_iq_dm)    
+        #self.connect(self._demod2, self._pmf2)    
+        #self.connect(self._pmf2, self.outfile_iq_dm)    
 
     def set_rate(self, rate):
         self._sync.set_rate(int(rate))

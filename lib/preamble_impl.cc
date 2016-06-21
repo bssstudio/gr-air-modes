@@ -40,8 +40,8 @@ air_modes::preamble::sptr air_modes::preamble::make(float channel_rate, float th
 
 air_modes::preamble_impl::preamble_impl(float channel_rate, float threshold_db) :
         gr::block ("preamble",
-           gr::io_signature::make2 (2, 2, sizeof(float), sizeof(float)), //stream 0 is received data, stream 1 is moving average for reference
-           gr::io_signature::make (1, 1, sizeof(float))) //the output soft symbols
+           gr::io_signature::make3 (3, 3, sizeof(float), sizeof(float), sizeof(gr_complex)), //stream 0 is received data, stream 1 is moving average for reference
+           gr::io_signature::make2 (2, 2, sizeof(float), sizeof(gr_complex))) //the output soft symbols
 {
     d_chip_rate = 2000000; //2Mchips per second
     set_rate(channel_rate);
@@ -58,8 +58,10 @@ void air_modes::preamble_impl::set_rate(float channel_rate) {
     d_samples_per_symbol = d_samples_per_chip * 2;
     d_check_width = 120 * d_samples_per_symbol;
     d_sample_rate = channel_rate;
-    set_output_multiple(1+d_check_width*2);
+    //set_output_multiple(1+d_check_width*2);
+    set_output_multiple(3*(1+d_check_width*2));
     set_history(d_samples_per_symbol);
+    prev_tm = 0;
 }
 
 void air_modes::preamble_impl::set_threshold(float threshold_db) {
@@ -90,14 +92,35 @@ static void integrate_and_dump(float *out, const float *in, int chips, int samps
 static const bool preamble_bits[] = {1, 0, 1, 0, 0, 0, 0, 1, 0, 1};
 static double correlate_preamble(const float *in, int samples_per_chip) {
     double corr = 0.0;
+    double maxpre = 0;
     for(int i=0; i<10; i++) {
-        for(int j=0; j<samples_per_chip;j++)
-            if(preamble_bits[i]) corr += in[i*samples_per_chip+j];
+        for(int j=0; j<samples_per_chip;j++) {
+            if(preamble_bits[i]) {
+                if (in[i*samples_per_chip+j] > maxpre) {
+                maxpre = in[i*samples_per_chip+j];
+                }
+            corr += in[i*samples_per_chip+j];
+            }
+        }
     }
+
+    double zcorr = 0;
+    for(int i=0; i<10; i++) {
+        for(int j=0; j<samples_per_chip;j++) {
+            if(preamble_bits[i] == 0) {
+              //zcorr += maxpre - in[i*samples_per_chip+j];
+              zcorr += corr /4.0 - in[i*samples_per_chip+j];
+            }
+        }
+    }
+
+    
+
+    corr = corr * 0.4 + zcorr * 0.6;
     return corr;
 }
 
-static pmt::pmt_t tag_to_timestamp(gr::tag_t tstamp, uint64_t abs_sample_cnt, int rate) {
+static pmt::pmt_t tag_to_timestamp(gr::tag_t tstamp, uint64_t abs_sample_cnt, int rate, bool single, bool snd) {
     uint64_t last_whole_stamp;
     double last_frac_stamp;
     pmt::pmt_t tstime = pmt::make_tuple(pmt::from_uint64(0), pmt::from_double(0));
@@ -131,7 +154,15 @@ static pmt::pmt_t tag_to_timestamp(gr::tag_t tstamp, uint64_t abs_sample_cnt, in
         abs_whole += 1;
     }
 
-    tstime = pmt::make_tuple(pmt::from_uint64(abs_whole), pmt::from_double(abs_frac));
+    if (!single) {
+      tstime = pmt::make_tuple(pmt::from_uint64(abs_whole), pmt::from_double(abs_frac));
+    } else {
+      if (!snd) {
+        tstime = pmt::from_uint64(abs_whole);
+      } else {
+        tstime = pmt::from_double(abs_frac);
+      }
+    }
 
     return tstime;
 }
@@ -143,6 +174,7 @@ int air_modes::preamble_impl::general_work(int noutput_items,
 {
     const float *in = (const float *) input_items[0];
     const float *inavg = (const float *) input_items[1];
+    const gr_complex *in_iq = (const gr_complex *) input_items[2];
 
     int mininputs = std::min(ninput_items[0], ninput_items[1]); //they should be matched but let's be safe
     //round number of input samples down to nearest d_samples_per_chip
@@ -151,6 +183,7 @@ int air_modes::preamble_impl::general_work(int noutput_items,
     if (ninputs <= 0) { consume_each(0); return 0; }
 
     float *out = (float *) output_items[0];
+    gr_complex *out_iq = (gr_complex*) output_items[1];
 
     if(0) std::cout << "Preamble called with " << ninputs << " samples" << std::endl;
 
@@ -209,16 +242,16 @@ int air_modes::preamble_impl::general_work(int noutput_items,
             if(!valid_preamble) continue;
 
             //be sure we've got enough room in the input buffer to copy out a whole packet
-            if(ninputs-i < 240*d_samples_per_chip) {
+            if(ninputs-i < 2*240*d_samples_per_chip) {
                 consume_each(std::max(i-1,0));
                 if(0) std::cout << "Preamble consumed " << std::max(i-1,0) << ", returned 0 (no room)" << std::endl;
                 return 0;
             }
 
-            //all right i'm prepared to call this a preamble
-            for(int j=0; j<240; j++) {
-                out[j] = in[i+int(j*d_samples_per_chip)] - inavg[i];
-            }
+            // //all right i'm prepared to call this a preamble
+            // for(int j=0; j<240; j++) {
+            //     out[j] = in[i+int(j*d_samples_per_chip)] - inavg[i];
+            // }
 
             //for(int j=0; j<240; j++) {
             //    out[j] = 0;
@@ -237,8 +270,42 @@ int air_modes::preamble_impl::general_work(int noutput_items,
 
             printf("Preamble...\n");
 
+
             //get the timestamp of the preamble
-            pmt::pmt_t tstamp = tag_to_timestamp(d_timestamp, abs_sample_cnt + i, d_sample_rate);
+            pmt::pmt_t tstamp = tag_to_timestamp(d_timestamp, abs_sample_cnt + i, d_sample_rate, false, false);
+
+            uint64_t whl = pmt::to_uint64(tag_to_timestamp(d_timestamp, abs_sample_cnt + i, d_sample_rate, true, false));
+            double frc = pmt::to_double(tag_to_timestamp(d_timestamp, abs_sample_cnt + i, d_sample_rate, true, true));
+            double tm = whl + frc;
+            double tdiff = tm - prev_tm;
+            std::cout << "Tag: " << tdiff << "\t"  << prev_tm  << "\t" << tm << std::endl;
+
+
+            bool overlapping = false;
+            if (tdiff < 0.000030) {
+            //if (tdiff > 0.000600) {
+              overlapping = true;
+              std::cout << "Overlapping preamble at " << tm << std::endl;
+            }
+
+            int outn= 0;
+            if (overlapping) {
+              for(int j=0; j<2400; j++) {
+                  out[j] = in[i+int((j-800)*d_samples_per_chip/10)] - inavg[i];
+                  out_iq[j] = in_iq[i+int((j-800)*d_samples_per_chip/10)];
+              }
+              for (int j=2400; j < 2400+6000; j++ ) {
+                  out[j] = 0;
+                  out_iq[j] = 0;
+              }
+              consume_each(i+240*d_samples_per_chip);
+              outn = 240*d_samples_per_chip + 6000;
+            } else {
+              consume_each(i+5);
+              outn = 0;
+            }
+
+            prev_tm = tm;
 
             //now tag the preamble
             add_item_tag(0, //stream ID
@@ -249,11 +316,10 @@ int air_modes::preamble_impl::general_work(int noutput_items,
                     );
 
             //produce only one output per work call -- TODO this should probably change
-            if(0) std::cout << "Preamble consumed " << i+240*d_samples_per_chip << "with i=" << i << ", returned 240" << std::endl;
+            if (0) std::cout << "Preamble consumed " << i+240*d_samples_per_chip << "with i=" << i << ", returned 240" << std::endl;
 
             //consume_each(i+240*d_samples_per_chip);
-            consume_each(i+5);
-            return 240;
+            return outn; 
         }
     }
 

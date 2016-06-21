@@ -22,6 +22,7 @@ private:
     gr::tag_t d_timestamp;
     pmt::pmt_t d_me, d_key;
     int d_sample_rate;
+    double prev_tm;
 
 public:
     preamble_impl(float channel_rate, float threshold_db);
